@@ -181,7 +181,7 @@ export class VaultClient {
 		// GitHub's contents API needs the current blob sha to overwrite; its
 		// absence means the file does not exist yet and this is a create.
 		const sha = await this.existingFileSha(normalized);
-		await this.octokit.rest.repos.createOrUpdateFileContents({
+		const commitRes = await this.octokit.rest.repos.createOrUpdateFileContents({
 			owner: this.config.owner,
 			repo: this.config.repo,
 			path: normalized,
@@ -191,7 +191,8 @@ export class VaultClient {
 			...(sha ? { sha } : {}),
 		});
 
-		return { path: normalized, created: sha === undefined };
+		const commitSha = (commitRes as any)?.data?.commit?.sha || "HEAD";
+		return { path: normalized, created: sha === undefined, commitSha };
 	}
 
 	/**
@@ -200,7 +201,7 @@ export class VaultClient {
 	 * a delete can never reach `.git/`, `.obsidian/`, agent dirs, or any non-note
 	 * file. The removal is a git commit and stays recoverable via `git revert`.
 	 */
-	async deleteNote(path: string): Promise<{ path: string }> {
+	async deleteNote(path: string): Promise<{ path: string; commitSha?: string }> {
 		const normalized = normalizePath(path);
 		if (normalized === null) {
 			throw new VaultError(`Invalid path: ${path}`);
@@ -218,7 +219,7 @@ export class VaultClient {
 		if (sha === undefined) {
 			throw new VaultError(`Note not found: ${normalized}`);
 		}
-		await this.octokit.rest.repos.deleteFile({
+		const delRes = await this.octokit.rest.repos.deleteFile({
 			owner: this.config.owner,
 			repo: this.config.repo,
 			path: normalized,
@@ -227,7 +228,8 @@ export class VaultClient {
 			branch: this.config.branch,
 		});
 
-		return { path: normalized };
+		const commitSha = (delRes as any)?.data?.commit?.sha || "HEAD";
+		return { path: normalized, commitSha };
 	}
 
 	private async existingFileSha(path: string): Promise<string | undefined> {

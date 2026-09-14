@@ -126,6 +126,7 @@ rl.on("line", async (raw) => {
 
 		try {
 			let resultText = "";
+			let structuredContent: Record<string, unknown> | undefined = undefined;
 			if (name === "list_notes") {
 				const { notes, truncated } = await vault.listNotes(args.dir);
 				const header = `${notes.length} note(s)${truncated ? " (truncated)" : ""}:`;
@@ -136,9 +137,18 @@ rl.on("line", async (raw) => {
 			} else if (name === "write_note") {
 				const res = await vault.writeNote(args.path, args.content);
 				resultText = `${res.created ? "Created" : "Updated"} ${res.path}`;
+				structuredContent = {
+					path: res.path,
+					created: res.created,
+					commitSha: res.commitSha || "",
+				};
 			} else if (name === "delete_note") {
 				const res = await vault.deleteNote(args.path);
 				resultText = `Deleted ${res.path}`;
+				structuredContent = {
+					path: res.path,
+					commitSha: res.commitSha || "",
+				};
 			} else if (name === "search_notes") {
 				const hits = await vault.searchNotes(args.query, args.limit || 10);
 				if (hits.length === 0) {
@@ -164,12 +174,16 @@ rl.on("line", async (raw) => {
 				return;
 			}
 
+			const resultObj: Record<string, unknown> = {
+				content: [{ type: "text", text: resultText }],
+			};
+			if (structuredContent !== undefined) {
+				resultObj.structuredContent = structuredContent;
+			}
 			const resp = {
 				jsonrpc: "2.0",
 				id,
-				result: {
-					content: [{ type: "text", text: resultText }],
-				},
+				result: resultObj,
 			};
 			process.stdout.write(JSON.stringify(resp) + "\n");
 		} catch (err: any) {
