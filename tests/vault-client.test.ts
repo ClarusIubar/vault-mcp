@@ -47,6 +47,7 @@ const treeResult = (
 ) => ({ data: { tree: entries, truncated } });
 
 let client: VaultClient;
+const commitSha = "0123456789abcdef0123456789abcdef01234567";
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -134,11 +135,11 @@ describe("writeNote", () => {
 
 	it("creates a note when it does not exist, base64-encoding UTF-8 content", async () => {
 		gh.getContent.mockRejectedValue(notFound());
-		gh.createOrUpdateFileContents.mockResolvedValue({ data: {} });
+		gh.createOrUpdateFileContents.mockResolvedValue({ data: { commit: { sha: commitSha } } });
 
 		const result = await client.writeNote("notes/new.md", "body ☕");
 
-		expect(result).toEqual({ path: "notes/new.md", created: true });
+		expect(result).toEqual({ path: "notes/new.md", created: true, commitSha });
 		const call = gh.createOrUpdateFileContents.mock.calls[0][0];
 		expect(call.content).toBe(b64("body ☕"));
 		expect(call.path).toBe("notes/new.md");
@@ -149,14 +150,21 @@ describe("writeNote", () => {
 
 	it("overwrites an existing note, passing its current sha", async () => {
 		gh.getContent.mockResolvedValue({ data: { type: "file", sha: "old-sha" } });
-		gh.createOrUpdateFileContents.mockResolvedValue({ data: {} });
+		gh.createOrUpdateFileContents.mockResolvedValue({ data: { commit: { sha: commitSha } } });
 
 		const result = await client.writeNote("notes/a.md", "updated");
 
-		expect(result).toEqual({ path: "notes/a.md", created: false });
+		expect(result).toEqual({ path: "notes/a.md", created: false, commitSha });
 		const call = gh.createOrUpdateFileContents.mock.calls[0][0];
 		expect(call.sha).toBe("old-sha");
 		expect(call.message).toContain("Update");
+	});
+
+	it("rejects a response without a real commit SHA", async () => {
+		gh.getContent.mockRejectedValue(notFound());
+		gh.createOrUpdateFileContents.mockResolvedValue({ data: {} });
+
+		await expect(client.writeNote("notes/missing-receipt.md", "body")).rejects.toThrow(/commit SHA/);
 	});
 
 	it("rejects an invalid path before hitting the API", async () => {
@@ -180,16 +188,23 @@ describe("deleteNote", () => {
 
 	it("deletes an existing note, passing its current sha", async () => {
 		gh.getContent.mockResolvedValue({ data: { type: "file", sha: "old-sha" } });
-		gh.deleteFile.mockResolvedValue({ data: {} });
+		gh.deleteFile.mockResolvedValue({ data: { commit: { sha: commitSha } } });
 
 		const result = await client.deleteNote("notes/a.md");
 
-		expect(result).toEqual({ path: "notes/a.md" });
+		expect(result).toEqual({ path: "notes/a.md", commitSha });
 		const call = gh.deleteFile.mock.calls[0][0];
 		expect(call.path).toBe("notes/a.md");
 		expect(call.sha).toBe("old-sha");
 		expect(call.branch).toBe("main");
 		expect(call.message).toContain("Delete");
+	});
+
+	it("rejects a delete response without a real commit SHA", async () => {
+		gh.getContent.mockResolvedValue({ data: { type: "file", sha: "old-sha" } });
+		gh.deleteFile.mockResolvedValue({ data: {} });
+
+		await expect(client.deleteNote("notes/missing-receipt.md")).rejects.toThrow(/commit SHA/);
 	});
 
 	it("throws when the note does not exist", async () => {

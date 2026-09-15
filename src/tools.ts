@@ -14,6 +14,7 @@ export type VaultDeleter = Pick<VaultClient, "deleteNote">;
 export type ToolResult = {
 	content: { type: "text"; text: string }[];
 	isError?: boolean;
+	structuredContent?: Record<string, unknown>;
 };
 
 export function textResult(text: string): ToolResult {
@@ -52,8 +53,15 @@ export async function writeNoteHandler(
 	content: string,
 ): Promise<ToolResult> {
 	try {
-		const { path: written, created } = await client.writeNote(path, content);
-		return textResult(`${created ? "Created" : "Updated"} ${written}`);
+		const result = await client.writeNote(path, content);
+		return {
+			...textResult(`${result.created ? "Created" : "Updated"} ${result.path}`),
+			structuredContent: {
+				path: result.path,
+				created: result.created,
+				commitSha: result.commitSha,
+			},
+		};
 	} catch (error) {
 		return errorResult(error);
 	}
@@ -61,8 +69,11 @@ export async function writeNoteHandler(
 
 export async function deleteNoteHandler(client: VaultDeleter, path: string): Promise<ToolResult> {
 	try {
-		const { path: deleted } = await client.deleteNote(path);
-		return textResult(`Deleted ${deleted}`);
+		const result = await client.deleteNote(path);
+		return {
+			...textResult(`Deleted ${result.path}`),
+			structuredContent: { path: result.path, commitSha: result.commitSha },
+		};
 	} catch (error) {
 		return errorResult(error);
 	}

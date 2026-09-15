@@ -35,6 +35,25 @@ export type SearchHit = {
 };
 
 const NOTE_EXTENSIONS = [".md", ".markdown"];
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/i;
+
+function requireCommitSha(value: unknown): string {
+	if (typeof value !== "string" || !COMMIT_SHA_PATTERN.test(value)) {
+		throw new VaultError("GitHub operation did not return a valid 40-character commit SHA");
+	}
+	return value.toLowerCase();
+}
+
+function commitShaFromResponse(response: unknown): string {
+	if (typeof response !== "object" || response === null) {
+		throw new VaultError("GitHub operation response is missing a commit SHA");
+	}
+	const commit = (response as { commit?: unknown }).commit;
+	if (typeof commit !== "object" || commit === null) {
+		throw new VaultError("GitHub operation response is missing a commit SHA");
+	}
+	return requireCommitSha((commit as { sha?: unknown }).sha);
+}
 
 /** Validate the Worker env (fail fast on misconfig) and build the vault-read config. */
 export function vaultConfigFromEnv(env: Env): VaultConfig {
@@ -166,7 +185,10 @@ export class VaultClient {
 	 * accepts markdown paths, so writes can never reach `.git/`, `.obsidian/`, or
 	 * any non-note file. Returns whether the note was created (vs. updated).
 	 */
-	async writeNote(path: string, content: string): Promise<{ path: string; created: boolean }> {
+	async writeNote(
+		path: string,
+		content: string,
+	): Promise<{ path: string; created: boolean; commitSha: string }> {
 		const normalized = normalizePath(path);
 		if (normalized === null) {
 			throw new VaultError(`Invalid path: ${path}`);
@@ -191,7 +213,7 @@ export class VaultClient {
 			...(sha ? { sha } : {}),
 		});
 
-		const commitSha = (commitRes as any)?.data?.commit?.sha || "HEAD";
+		const commitSha = commitShaFromResponse(commitRes.data);
 		return { path: normalized, created: sha === undefined, commitSha };
 	}
 
@@ -201,7 +223,7 @@ export class VaultClient {
 	 * a delete can never reach `.git/`, `.obsidian/`, agent dirs, or any non-note
 	 * file. The removal is a git commit and stays recoverable via `git revert`.
 	 */
-	async deleteNote(path: string): Promise<{ path: string; commitSha?: string }> {
+	async deleteNote(path: string): Promise<{ path: string; commitSha: string }> {
 		const normalized = normalizePath(path);
 		if (normalized === null) {
 			throw new VaultError(`Invalid path: ${path}`);
@@ -228,7 +250,7 @@ export class VaultClient {
 			branch: this.config.branch,
 		});
 
-		const commitSha = (delRes as any)?.data?.commit?.sha || "HEAD";
+		const commitSha = commitShaFromResponse(delRes.data);
 		return { path: normalized, commitSha };
 	}
 

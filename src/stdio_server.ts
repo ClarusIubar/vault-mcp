@@ -3,7 +3,10 @@ import process from "node:process";
 import { LocalGitVaultClient } from "./local_vault.ts";
 
 const vaultRoot = process.env.VAULT_LOCAL_ROOT || process.cwd();
-const vault = new LocalGitVaultClient(vaultRoot);
+const vault = new LocalGitVaultClient(vaultRoot, {
+	authorName: process.env.GIT_AUTHOR_NAME,
+	authorEmail: process.env.GIT_AUTHOR_EMAIL,
+});
 
 const rl = readline.createInterface({
 	input: process.stdin,
@@ -140,14 +143,14 @@ rl.on("line", async (raw) => {
 				structuredContent = {
 					path: res.path,
 					created: res.created,
-					commitSha: res.commitSha || "",
+					commitSha: res.commitSha,
 				};
 			} else if (name === "delete_note") {
 				const res = await vault.deleteNote(args.path);
 				resultText = `Deleted ${res.path}`;
 				structuredContent = {
 					path: res.path,
-					commitSha: res.commitSha || "",
+					commitSha: res.commitSha,
 				};
 			} else if (name === "search_notes") {
 				const hits = await vault.searchNotes(args.query, args.limit || 10);
