@@ -32,6 +32,14 @@ export type LocalVaultOptions = {
 
 const NOTE_EXTENSIONS = [".md", ".markdown"];
 const DEFAULT_DENIED = [".git", ".obsidian", ".claude"];
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
+
+function requireCommitSha(value: string): string {
+	if (!COMMIT_SHA_PATTERN.test(value)) {
+		throw new VaultError("Git operation did not produce a valid 40-character commit SHA");
+	}
+	return value;
+}
 
 export class LocalGitVaultClient {
 	private vaultRoot: string;
@@ -114,43 +122,8 @@ export class LocalGitVaultClient {
 		return stdout.trim();
 	}
 
-	private async getHeadCommitSha(): Promise<string | undefined> {
-		try {
-			let gitDir = path.join(this.vaultRoot, ".git");
-			const stat = await fs.stat(gitDir);
-			if (stat.isFile()) {
-				const content = (await fs.readFile(gitDir, "utf-8")).trim();
-				if (content.startsWith("gitdir:")) {
-					gitDir = path.resolve(this.vaultRoot, content.slice(7).trim());
-				}
-			}
-			const headFile = path.join(gitDir, "HEAD");
-			const headContent = (await fs.readFile(headFile, "utf-8")).trim();
-			if (headContent.startsWith("ref:")) {
-				const refRel = headContent.slice(4).trim();
-				const refFile = path.join(gitDir, refRel);
-				try {
-					return (await fs.readFile(refFile, "utf-8")).trim();
-				} catch {
-					const packedFile = path.join(gitDir, "packed-refs");
-					try {
-						const packed = await fs.readFile(packedFile, "utf-8");
-						for (const line of packed.split("\n")) {
-							if (line.endsWith(refRel)) {
-								return line.split(" ")[0].trim();
-							}
-						}
-					} catch {
-						// fallback
-					}
-				}
-			} else if (headContent.length >= 40 && !/[\s/]/.test(headContent)) {
-				return headContent;
-			}
-			return await this.runGit(["rev-parse", "HEAD"]);
-		} catch {
-			return undefined;
-		}
+	private async getHeadCommitSha(): Promise<string> {
+		return requireCommitSha(await this.runGit(["rev-parse", "HEAD"]));
 	}
 
 	async listNotes(dir?: string): Promise<{ notes: NoteEntry[]; truncated: boolean }> {
@@ -158,7 +131,7 @@ export class LocalGitVaultClient {
 		const results: NoteEntry[] = [];
 
 		const scanDir = async (currentAbsDir: string) => {
-			let entries;
+			let entries: { name: string; isDirectory(): boolean; isFile(): boolean }[] = [];
 			try {
 				entries = await fs.readdir(currentAbsDir, { withFileTypes: true });
 			} catch {
@@ -220,7 +193,10 @@ export class LocalGitVaultClient {
 	async writeNote(
 		relPath: string,
 		content: string,
-	): Promise<{ path: string; created: boolean; commitSha?: string }> {
+	): Promise<{ path: string; created: boolean; commitSha: string }> {
+		if (!this.gitEnabled) {
+			throw new VaultError("Git commit receipt is required for write operations");
+		}
 		const normalized = this.normalizePath(relPath);
 		if (!this.isNote(normalized)) {
 			throw new VaultError(`Not a note (.md/.markdown): ${relPath}`);
@@ -241,26 +217,25 @@ export class LocalGitVaultClient {
 
 		await fs.writeFile(fullAbs, content, { encoding: "utf-8" });
 
-		let commitSha: string | undefined;
-		if (this.gitEnabled) {
-			try {
-				const action = created ? "create" : "update";
-				if (created) {
-					await this.runGit(["add", normalized]);
-					await this.runGit(["commit", "-m", `docs(vault): ${action} ${normalized}`]);
-				} else {
-					await this.runGit(["commit", "-m", `docs(vault): ${action} ${normalized}`, normalized]);
-				}
-				commitSha = await this.getHeadCommitSha();
-			} catch {
-				commitSha = undefined;
+		try {
+			const action = created ? "create" : "update";
+			if (created) {
+				await this.runGit(["add", normalized]);
+				await this.runGit(["commit", "-m", `docs(vault): ${action} ${normalized}`]);
+			} else {
+				await this.runGit(["commit", "-m", `docs(vault): ${action} ${normalized}`, normalized]);
 			}
+			return { path: normalized, created, commitSha: await this.getHeadCommitSha() };
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new VaultError(`Failed to commit note ${normalized}: ${message}`);
 		}
-
-		return { path: normalized, created, commitSha };
 	}
 
-	async deleteNote(relPath: string): Promise<{ path: string; commitSha?: string }> {
+	async deleteNote(relPath: string): Promise<{ path: string; commitSha: string }> {
+		if (!this.gitEnabled) {
+			throw new VaultError("Git commit receipt is required for delete operations");
+		}
 		const normalized = this.normalizePath(relPath);
 		if (!this.isNote(normalized)) {
 			throw new VaultError(`Not a note (.md/.markdown): ${relPath}`);
@@ -279,18 +254,14 @@ export class LocalGitVaultClient {
 			throw new VaultError(`Failed to delete note ${relPath}: ${err.message}`);
 		}
 
-		let commitSha: string | undefined;
-		if (this.gitEnabled) {
-			try {
-				await this.runGit(["add", normalized]);
-				await this.runGit(["commit", "-m", `docs(vault): delete ${normalized}`]);
-				commitSha = await this.getHeadCommitSha();
-			} catch {
-				commitSha = undefined;
-			}
+		try {
+			await this.runGit(["add", normalized]);
+			await this.runGit(["commit", "-m", `docs(vault): delete ${normalized}`]);
+			return { path: normalized, commitSha: await this.getHeadCommitSha() };
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new VaultError(`Failed to commit deletion ${normalized}: ${message}`);
 		}
-
-		return { path: normalized, commitSha };
 	}
 
 	async searchNotes(query: string, limit = 10): Promise<SearchHit[]> {

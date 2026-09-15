@@ -12,6 +12,8 @@ import {
 	type VaultWriter,
 	writeNoteHandler,
 } from "../src/tools";
+
+const commitSha = "0123456789abcdef0123456789abcdef01234567";
 import { VaultError } from "../src/vault";
 
 const okClient: VaultReader = {
@@ -106,9 +108,9 @@ describe("readNoteHandler", () => {
 	});
 });
 
-describe("writeNoteHandler", () => {
+	describe("writeNoteHandler", () => {
 	const okWriter: VaultWriter = {
-		writeNote: async (path: string) => ({ path, created: true }),
+		writeNote: async (path: string) => ({ path, created: true, commitSha }),
 	};
 
 	it("reports a create", async () => {
@@ -118,11 +120,12 @@ describe("writeNoteHandler", () => {
 	});
 
 	it("reports an update", async () => {
-		const client: VaultWriter = {
-			writeNote: async (path: string) => ({ path, created: false }),
+	const client: VaultWriter = {
+			writeNote: async (path: string) => ({ path, created: false, commitSha }),
 		};
 		const result = await writeNoteHandler(client, "a.md", "body");
 		expect(result.content[0].text).toBe("Updated a.md");
+		expect(result.structuredContent).toEqual({ path: "a.md", created: false, commitSha });
 	});
 
 	it("returns an error result when the client throws", async () => {
@@ -140,11 +143,12 @@ describe("writeNoteHandler", () => {
 describe("deleteNoteHandler", () => {
 	it("reports a delete", async () => {
 		const client: VaultDeleter = {
-			deleteNote: async (path: string) => ({ path }),
+			deleteNote: async (path: string) => ({ path, commitSha }),
 		};
 		const result = await deleteNoteHandler(client, "a.md");
 		expect(result.content[0].text).toBe("Deleted a.md");
 		expect(result.isError).toBeUndefined();
+		expect(result.structuredContent).toEqual({ path: "a.md", commitSha });
 	});
 
 	it("returns an error result when the client throws", async () => {

@@ -35,7 +35,7 @@ export function createGuardedApiHandler(inner: ApiHandler): ApiHandler {
 
 // ── MCP Tool Parameter Validation Gate ────────────────────────────────────────
 
-const CONTROL_CHAR_REGEX = /[\x00-\x1f\x7f]/;
+const CONTROL_CHAR_REGEX = new RegExp("[\\x00-\\x1f\\x7f]");
 const WINDOWS_DRIVE_REGEX = /^[a-zA-Z]:/;
 
 export function validateVaultPath(raw: unknown): string {
